@@ -9,8 +9,26 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,MUST-DO
+# MAGIC %md
+# MAGIC ## Must TODO, later could be automated IasCode
+# MAGIC 1. install com.databricks.labs:tika-ocr:0.1.6 as maven manually in cluster library UI page.
+# MAGIC 2. include /Volumes/yyang/centene_testing/init-scripts/init.sh as cluster init script.
+
+# COMMAND ----------
+
+# %restart_python
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC Given our utility library installed on your cluster as an external maven dependency, we abstracted most of its complexity away through a simple operation, `spark.read.format('tika')`. This command will issue similar operation as `binaryFile` but will also extract all text available and document metadata (such as author, name, permissions, etc.)
+
+# COMMAND ----------
+
+# landing_zone = '/tmp/fsi/datasets/digitization/csr/files' 
+# k = 3
+# landing_zone_fs = '{}/**/pages'.format(landing_zone)
 
 # COMMAND ----------
 
@@ -29,15 +47,15 @@ from pyspark.sql.functions import udf
 import re
 import unidecode
 
-
+# Define a user-defined function (UDF) to generate a masked version of text
 @udf('string')
 def gen_mask(text):
-  text = text.lower()
-  text = unidecode.unidecode(text) # transliterates any unicode string into the closest possible representation in ascii text
-  text = re.sub('[\s\t\n]+', 'S', text)
-  text = re.sub('[a-z]+', 'A', text)
-  text = re.sub('[0-9]+', '9', text)
-  text = re.sub('[^AS9]+', 'W', text)
+  text = text.lower() # Convert text to lowercase
+  text = unidecode.unidecode(text) # Transliterates any unicode string into the closest possible representation in ASCII text
+  text = re.sub('[\s\t\n]+', 'S', text) # Replace all whitespace characters with 'S'
+  text = re.sub('[a-z]+', 'A', text) # Replace all lowercase alphabets with 'A'
+  text = re.sub('[0-9]+', '9', text) # Replace all digits with '9'
+  text = re.sub('[^AS9]+', 'W', text) # Replace all characters not being 'A', 'S', or '9' with 'W'
   return text
 
 # COMMAND ----------
@@ -53,7 +71,9 @@ display(ngram_df[['path', 'contentText', 'mask']])
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC We invite our readers to scroll that list and "train their eyes" to spot main structural differences. For more details (and for a shameless plug), please refer to the excellent (albeit dated) book [Mastering Spark for Data Science](https://www.amazon.com/Mastering-Spark-Science-Andrew-Morgan/dp/1785882147) written by practitioners for practitioners - 2 authors being now databricks employees.
+# MAGIC We invite our readers to scroll that list and "train their eyes" to spot main structural differences. 
+# MAGIC
+# MAGIC (Optional) For more details (and for a shameless plug), please refer to the excellent (albeit dated) book [Mastering Spark for Data Science](https://www.amazon.com/Mastering-Spark-Science-Andrew-Morgan/dp/1785882147) written by practitioners for practitioners - 2 authors being now databricks employees.
 
 # COMMAND ----------
 
@@ -66,8 +86,28 @@ display(ngram_df[['path', 'contentText', 'mask']])
 from sklearn.feature_extraction.text import TfidfVectorizer
 vectorizer = TfidfVectorizer(ngram_range=(2, 4), analyzer='char')
 X = vectorizer.fit_transform(ngram_df['mask'])
-for mask in vectorizer.get_feature_names()[0:10]:
+for mask in vectorizer.get_feature_names_out()[0:10]:
   print(mask)
+
+# COMMAND ----------
+
+print(len(vectorizer.get_feature_names_out()))
+X.toarray()
+
+# COMMAND ----------
+
+import pandas as pd
+df_X = pd.DataFrame(X.toarray(), columns=vectorizer.get_feature_names_out())
+df_X.display()
+print(df_X.isna().sum().sum())
+
+# COMMAND ----------
+
+X.shape
+
+# COMMAND ----------
+
+X[:10,].shape
 
 # COMMAND ----------
 
@@ -76,17 +116,109 @@ for mask in vectorizer.get_feature_names()[0:10]:
 
 # COMMAND ----------
 
+# DBTITLE 1,Dont RUN
+# (DONT RUN) Debug Only
+# doing this because otherwise below sklearn KMeans will report error of "Exception ignored on calling ctypes callback function: <function _ThreadpoolInfo._find_modules_with_dl_iterate_phdr.<locals>.match_module_callback at 0x7f68cef71bc0>"
+# %pip install --upgrade threadpoolctl
+# %pip install --upgrade numpy scikit-learn threadpoolctl
+
+# COMMAND ----------
+
 from sklearn.cluster import KMeans
 import numpy as np
-kmeans = KMeans(n_clusters=k, random_state=0).fit(X)
+print("# of clusters: {}".format(k))
+kmeans = KMeans(n_clusters=k, random_state=0, n_init="auto").fit(X)
 ys = kmeans.transform(X)
 ngram_df['cluster'] = [np.argmin(y) for y in ys]
 ngram_df['distance'] = [np.min(y) for y in ys]
 
 # COMMAND ----------
 
+ngram_df
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC Let's find the most descriptive documents for each identified cluster. As expected, we could find pages of highly unstructured text as well a tabular information. In this example, we will consider `cluster_1` to be made of highly structured information that we may want to delegate to a post-processing layer such as AWS Textract. `cluster_2`, however, contains plain text content that was already extracted through Tika with little or no benefits (and high costs) for a post processing layer.  
+
+# COMMAND ----------
+
+# MAGIC %pip install PyMuPDF
+
+# COMMAND ----------
+
+import fitz  # PyMuPDF
+from IPython.display import SVG, display
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Open the PDF file
+print(rec['path'])
+doc = fitz.open('/dbfs/tmp/fsi/datasets/digitization/csr/files/165f0859c95c45db969a2904274756be/pages/65.pdf')
+print(doc.get_toc())
+# Select the first page
+page = doc.load_page(0)  # 0 is the first page
+
+# Get the Pixmap of the page (raster image)
+pix = page.get_pixmap()
+display(pix)
+
+# Convert Pixmap to a NumPy array
+img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+
+# Display the image using matplotlib
+plt.figure(figsize=(10, 10))
+plt.imshow(img)
+plt.axis('off')
+plt.show()
+
+# # or SVG image
+# svg_image = page.get_svg_image()
+# display(SVG(svg_image))
+
+# Save the Pixmap as an image file or display it directly
+# pix.save("page_0.png")
+
+# For displaying the image in Databricks notebook
+# display(pix)
+
+# COMMAND ----------
+
+# (DONT RUN) bad package, error installing
+# %pip install python-poppler
+
+# COMMAND ----------
+
+# MAGIC %pip install poppler-utils
+
+# COMMAND ----------
+
+# # (DONT RUN) error msg: "PDFInfoNotInstalledError: Unable to get page count. Is poppler installed and in PATH?"
+# # will not work from pdf2image as popular-utils needs to be installed under ubuntu as an apt-get package, and Databricks doesn't support it, the only option is docker. However, we could use an alternative package like "import fitz  # PyMuPDF"
+# from pdf2image import convert_from_path
+
+##: test single case
+# images = convert_from_path(rec['path'])
+# display(images[0])
+
+##: original loop
+# from io import BytesIO
+# from pdf2image import convert_from_bytes
+# import matplotlib.pyplot as plt
+
+# descriptive_docs = ngram_df.loc[ngram_df.groupby('cluster')['distance'].idxmin()].reset_index(drop=True)
+# for cid in range(k):
+#     rec = descriptive_docs[descriptive_docs['cluster'] == cid].reset_index().iloc[0]
+#     img = convert_from_bytes(rec.content)[0]
+#     plt.figure(figsize=(10,10))
+#     plt.title('cluster {}'.format(cid))
+#     plt.xticks([], [])
+#     plt.yticks([], [])
+#     plt.imshow(img)
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 

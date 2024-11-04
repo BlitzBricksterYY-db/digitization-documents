@@ -92,12 +92,19 @@ def split_pages(content):
 
 # COMMAND ----------
 
+print("sector default from .yml config is: ",sector)
+sector = "i91"
+print("Now change to 'Healthcare' sector as:", sector)
+
+# COMMAND ----------
+
 import uuid
 import os
 
 # reinitiate the landing zone for the download
 dbutils.fs.rm(landing_zone, True)
 dbutils.fs.mkdirs(landing_zone)
+print("Storage location for landing zone is: {}".format(landing_zone))
 
 csr_data = []
 organizations = get_organizations(sector)
@@ -109,7 +116,10 @@ print('*'*50)
 for i, organization in enumerate(organizations):
   
     # retrieve CSR report for a given organization
-    url = get_organization_details(organization)
+    try:
+        url = get_organization_details(organization)
+    except AttributeError:
+        print('Failed to retrieve report for [{}]'.format(organization))
     if url:
         try:
             # generate a unique identifier and a unique path where files will be stored
@@ -136,9 +146,25 @@ for i, organization in enumerate(organizations):
 
 # COMMAND ----------
 
+print("Storage location for landing zone is: {}".format(landing_zone))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC
+# MAGIC check the storage folder here, replace the UUID to the real one in your folder.
+# MAGIC
+# MAGIC `cd /dbfs/tmp/fsi/datasets/digitization/csr/files/{165f0859c95c45db969a2904274756be}/pages`
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Binary format
 # MAGIC Spark comes with a native support for binary file. This operation returns a dataframe with content exposed as a byte array together with metadata such as file path, modification time or file size. In this notebook's companion library (see [github](https://github.com/databrickslabs/tika-ocr)), we used that format as a baseline to our project and extended its capability to include the entire suite of Tika parsers as well as Tesseract support, as reported in our next notebook.
+
+# COMMAND ----------
+
+print(landing_zone_fs)
 
 # COMMAND ----------
 

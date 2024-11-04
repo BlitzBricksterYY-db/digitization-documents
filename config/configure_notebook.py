@@ -10,11 +10,23 @@ warnings.filterwarnings("ignore")
 
 # MAGIC %sh
 # MAGIC mkdir -p /dbfs/FileStore/solution_accelerators/digitization/ && touch /dbfs/FileStore/solution_accelerators/digitization/init.sh
+# MAGIC
+# MAGIC # replace init.sh path with your UC volumn path
 # MAGIC cat <<EOF > /dbfs/FileStore/solution_accelerators/digitization/init.sh
 # MAGIC #!/usr/bin/env bash
 # MAGIC sudo apt-get install -y tesseract-ocr
-# MAGIC sudo apt-get install -y poppler-utils
+# MAGIC # sudo apt-get install -y poppler-utils # obsolete package, pip pdf2image does the job
 # MAGIC EOF
+# MAGIC
+# MAGIC # copy to volume for UC path
+# MAGIC cp -p '/dbfs/FileStore/solution_accelerators/digitization/init.sh' '/Volumes/yyang/centene_testing/init-scripts/init.sh'
+
+# COMMAND ----------
+
+# DBTITLE 1,added source the init.sh
+# MAGIC %sh
+# MAGIC # this is only needed for local interactive notebook testing, it should be setup as init.sh for your cluster
+# MAGIC source /Volumes/yyang/centene_testing/init-scripts/init.sh
 
 # COMMAND ----------
 
