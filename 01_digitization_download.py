@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Download reports
+# MAGIC # Setup
 # MAGIC For the purpose of this exercise, we will be loading some publicly available dataset containing text, images and tables. Available as PDF documents online, corporate responsiblity reports (CSR) are perfect examples of unstructured documents containing valuable insights. Compliance officers and market analysts would manually review these ESG disclosures, copy / paste relevant tables onto spreadsheets and gather as much information as possible from the text included across all different pages of different formats. This process could be automated using Apache Tika, Tesseract OCR (and additionally [AWS Textract](https://aws.amazon.com/textract/) or [John Snow Labs](https://nlp.johnsnowlabs.com/2022/09/06/finclf_augmented_esg_en.html) libraries). We will be loading all required libraries in the companion notebook (make sure to provision both scala and native libraries on your databricks cluster)
 
 # COMMAND ----------
@@ -11,6 +11,11 @@
 
 # MAGIC %md
 # MAGIC While our story officially starts with documents of any type stored on cloud storage, we will be programmatically accessing some CSR reports online for a given industry (configured by default to scan for Brewing companies). Please refer to https://www.responsibilityreports.com terms and conditions, enable internet connectivity from your databricks environment or replace this section with your own data.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Define Helper Functions
 
 # COMMAND ----------
 
@@ -52,13 +57,13 @@ def get_organization_details(organization):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Separate pages
+# MAGIC ### Separate pages helper functions
 # MAGIC We would like to separate pages by complexity of parsing. While some pages may contain plain text that will be extracted as-is, others may include tables that could benefit from a post processing engine such as AWS textract. For that purpose, we split our various PDF as multiple pages documents that we store individually on our cloud storage together with a unique identifier (will be useful for our post processing logic).
 
 # COMMAND ----------
 
-from PyPDF2 import PdfReader
-from PyPDF2 import PdfWriter
+from pypdf import PdfReader
+from pypdf import PdfWriter
 from io import BytesIO
 
 
@@ -92,44 +97,126 @@ def split_pages(content):
 
 # COMMAND ----------
 
-print("sector default from .yml config is: ",sector)
-sector = "i91"
-print("Now change to 'Healthcare' sector as:", sector)
+# print("sector default from .yml config is: ",sector)
+# sector = "i91"
+# print("Now change to 'Healthcare' sector as:", sector)
 
 # COMMAND ----------
 
-import uuid
+# import uuid
+# import os
+
+# # reinitiate the landing zone for the download
+# dbutils.fs.rm(landing_zone, True)
+# dbutils.fs.mkdirs(landing_zone)
+# print("Storage location for landing zone is: {}".format(landing_zone))
+
+# csr_data = []
+# organizations = get_organizations(sector)
+# n = len(organizations)
+# print('*'*50)
+# print('Downloading reports for {} organization(s)'.format(n))
+# print('*'*50)
+
+# for i, organization in enumerate(organizations):
+  
+#     # retrieve CSR report for a given organization
+#     try:
+#         url = get_organization_details(organization)
+#     except AttributeError:
+#         print('Failed to retrieve report for [{}]'.format(organization))
+#     if url:
+#         try:
+#             # generate a unique identifier and a unique path where files will be stored
+#             doc_id = uuid.uuid4().hex
+#             dir = '/dbfs{}/{}/pages'.format(landing_zone, doc_id)
+#             os.makedirs(dir, exist_ok=True)
+
+#             # download PDF content
+#             response = requests.get(url)
+#             content = response.content
+
+#             # split PDF into individual pages
+#             pages = split_pages(content)
+
+#             # write each page individually to storage
+#             for j, page_content in enumerate(pages):
+#                 with open('{}/{}.pdf'.format(dir, j + 1), 'wb') as f:
+#                     f.write(page_content)
+
+#             print('[{}/{}] Downloaded report for [{}]'.format(i + 1, n, organization))
+#         except:
+#             print('[{}/{}] Failed to download report for [{}]'.format(i + 1, n, organization))
+#             pass
+
+# COMMAND ----------
+
+# print("Storage location for landing zone is: {}".format(landing_zone))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Working on UC volume files
+
+# COMMAND ----------
+
+# DBTITLE 1,update landing zone to be UC volume
 import os
 
-# reinitiate the landing zone for the download
-dbutils.fs.rm(landing_zone, True)
-dbutils.fs.mkdirs(landing_zone)
+landing_zone = "/Volumes/yyang/centene_testing/pdf"
 print("Storage location for landing zone is: {}".format(landing_zone))
+print("Content: {}".format(dbutils.fs.ls(landing_zone)))
+print("Content: {}".format(os.listdir(landing_zone,  )))
 
-csr_data = []
-organizations = get_organizations(sector)
-n = len(organizations)
-print('*'*50)
-print('Downloading reports for {} organization(s)'.format(n))
-print('*'*50)
+# COMMAND ----------
 
-for i, organization in enumerate(organizations):
-  
-    # retrieve CSR report for a given organization
-    try:
-        url = get_organization_details(organization)
-    except AttributeError:
-        print('Failed to retrieve report for [{}]'.format(organization))
-    if url:
+from pyspark.sql.functions import input_file_name
+
+# Read PDF files as binary
+binary_df = spark.read.format('tika').load(landing_zone)
+binary_df = binary_df.withColumn("path", input_file_name())
+
+# COMMAND ----------
+
+binary_df.display()
+
+# COMMAND ----------
+
+
         try:
             # generate a unique identifier and a unique path where files will be stored
             doc_id = uuid.uuid4().hex
-            dir = '/dbfs{}/{}/pages'.format(landing_zone, doc_id)
+            dir = '{}/{}/pages'.format(landing_zone, doc_id)
             os.makedirs(dir, exist_ok=True)
 
-            # download PDF content
-            response = requests.get(url)
-            content = response.content
+            # open PDF content
+from pypdf import PdfFileReader
+import os
+
+# Function to read PDF content
+def read_pdf(file_path):
+    with open(file_path, 'rb') as file:
+        reader = PdfFileReader(file)
+        content = ""
+        for page_num in range(reader.getNumPages()):
+            page = reader.getPage(page_num)
+            content += page.extract_text()
+    return content
+
+# List all PDF files in the landing zone
+pdf_files = [f for f in os.listdir(landing_zone) if f.endswith('.pdf')]
+
+# Read content from each PDF file
+pdf_contents = {}
+for pdf_file in pdf_files:
+    file_path = os.path.join(landing_zone, pdf_file)
+    pdf_contents[pdf_file] = read_pdf(file_path)
+
+# Display the content of the PDFs
+for pdf_file, content in pdf_contents.items():
+    print(f"Content of {pdf_file}:")
+    print(content)
+            
 
             # split PDF into individual pages
             pages = split_pages(content)
@@ -139,22 +226,10 @@ for i, organization in enumerate(organizations):
                 with open('{}/{}.pdf'.format(dir, j + 1), 'wb') as f:
                     f.write(page_content)
 
-            print('[{}/{}] Downloaded report for [{}]'.format(i + 1, n, organization))
+            print('[{}/{}] Downloaded report and split into pages for [{}]'.format(i + 1, n, organization))
         except:
             print('[{}/{}] Failed to download report for [{}]'.format(i + 1, n, organization))
             pass
-
-# COMMAND ----------
-
-print("Storage location for landing zone is: {}".format(landing_zone))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC
-# MAGIC check the storage folder here, replace the UUID to the real one in your folder.
-# MAGIC
-# MAGIC `cd /dbfs/tmp/fsi/datasets/digitization/csr/files/{165f0859c95c45db969a2904274756be}/pages`
 
 # COMMAND ----------
 

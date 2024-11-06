@@ -14,7 +14,8 @@ warnings.filterwarnings("ignore")
 # MAGIC # replace init.sh path with your UC volumn path
 # MAGIC cat <<EOF > /dbfs/FileStore/solution_accelerators/digitization/init.sh
 # MAGIC #!/usr/bin/env bash
-# MAGIC sudo apt-get install -y tesseract-ocr
+# MAGIC sudo rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* && sudo apt-get purge && sudo apt-get clean && sudo apt-get update && sudo apt-get install poppler-utils tesseract-ocr -y
+# MAGIC # sudo apt-get install -y tesseract-ocr
 # MAGIC # sudo apt-get install -y poppler-utils # obsolete package, pip pdf2image does the job
 # MAGIC EOF
 # MAGIC
@@ -38,11 +39,12 @@ model_name = 'table_classification'
 
 # COMMAND ----------
 
-# Set sector to include brewing companies
+# Set sector to include brewing companies， for healthcare payor, it is i91.
 sector = 'i22' 
 
 # Here we use a `/tmp/...` path in DBFS to minimize dependency. We recommend using a `/mnt/...` path or one that directly connects to your cloud storage for production usage. To learn more about mount points, please review [this document](https://docs.databricks.com/dbfs/mounts.html).  If you would like to use a mount point or a different path, please update the variable below with the appropriate path:
-landing_zone = '/tmp/fsi/datasets/digitization/csr/files' 
+# Here we update to use Unity Catalog path.
+landing_zone = '/Volumes/yyang/centene_testing/pdf' #'/tmp/fsi/datasets/digitization/csr/files' 
 k = 3
 landing_zone_fs = '{}/**/pages'.format(landing_zone)
 
